@@ -1,0 +1,121 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/sem.h>
+#include <sys/ipc.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+void P(int semid,int index);
+void V(int semid,int index);
+
+union semun{
+    int val;
+    struct semid_ds *buf;
+    unsigned short array;
+};
+
+int main(int argc,char *argv[])
+{
+    int shm_id,sem_id;
+    union semun arg;
+    char* shared_memory;
+    struct shmid_ds shmbuffer;
+    int shm_size;
+    int child1,child2;
+    int fd1=open(argv[1],O_RDWR);
+    int fd2=open(argv[2],O_CREAT);
+    int symbol=1;
+    int in,out;
+    in=out=0;
+    shm_id=shmget((key_t)123,(size_t)4096,0666|IPC_CREAT);
+    if(shm_id==-1){
+        printf("shmget failed\n");
+    }
+    shared_memory=(char*)shmat(shm_id,0,0);
+    printf("shared memory attached at address %p\n",shared_memory);
+    sem_id=semget((key_t)254,3,0666|IPC_CREAT);
+    if(sem_id<0){
+        printf("semget failed\n");
+    }
+    printf("creat a sem successfully:%d\n",sem_id);
+    arg.val=1;
+    if(semctl(sem_id,0,SETVAL,arg)==-1){
+        printf("semctl setval error(first)!\n");
+    }
+    arg.val=2048;
+    if(semctl(sem_id,1,SETVAL,arg)==-1){
+        printf("semctl setval error(second)!\n");
+    }
+    arg.val=0;
+    if(semctl(sem_id,2,SETVAL,arg)==-1){
+        printf("semctl setval error(third)!\n");
+    }
+    child1=fork();
+    if(child1==0){
+        while(symbol){
+            P(sem_id,1);
+            P(sem_id,0);
+            symbol=read(fd1,&(shared_memory[in++]),1);
+            //printf("%d\n",symbol);
+            printf("%d %d\n",in,out);
+            V(sem_id,0);
+            V(sem_id,2);
+        }
+        kill(child1,0);
+    }
+    if((child2=fork())<0){
+    printf("!\n");
+    return 0;
+    }
+    if(child2==0){
+        while(1){
+            P(sem_id,2);
+            P(sem_id,0);
+            write(fd2,&(shared_memory[out++]),1);
+            printf("%d %d\n",in,out);
+            V(sem_id,0);
+            V(sem_id,1);
+            if(out==in) break;
+        }
+        kill(child2,0);
+    }
+    if(waitpid(child1,NULL,0)==-1){
+        //printf("error\n");
+    }else printf("Child Process1 is killed!\n");
+    if(waitpid(child2,NULL,0)==-1){
+        printf("error\n");
+    }//else printf("Child Process2 is killed!\n");
+    close(fd1);
+    close(fd2);
+    semctl(sem_id,0,IPC_RMID);
+    semctl(sem_id,1,IPC_RMID);
+    semctl(sem_id,2,IPC_RMID);
+    shmdt(shared_memory);
+    shmctl(shm_id,IPC_RMID,0);
+    return 0;
+}
+
+void P(int semid,int index)
+{
+    struct sembuf sem;
+    sem.sem_num = index;
+    sem.sem_op = -1;
+    sem.sem_flg = 0; //操作标记：0或IPC_NOWAIT等
+    semop(semid,&sem,1);	//1:表示执行命令的个数
+    return;
+}
+
+void V(int semid,int index)
+{
+    struct sembuf sem;
+    sem.sem_num = index;
+    sem.sem_op = 1;
+    sem.sem_flg = 0; //操作标记：0或IPC_NOWAIT等
+    semop(semid,&sem,1);	//1:表示执行命令的个数
+    return;
+}
