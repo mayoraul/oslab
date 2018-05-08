@@ -1,0 +1,86 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/wait.h>
+
+void SignHandler_1(int signum);
+void SignHandler_2(int signum);
+int child1,child2;
+int filedis[2];
+
+int main(void)
+{
+    char buffer[40];
+    char info[40];
+    int status;
+    int counter = 1;
+    printf("Process Parent pid %d\n",getpid());
+    if(pipe(filedis) < 0)
+    {
+        printf("Create pipe failed\n");
+        return -1;
+    }
+    signal(SIGINT,SignHandler_1);
+    child1 = fork();
+    if(child1 == 0)
+    {
+        printf("Process1 pid %d\n",getpid());
+        signal(SIGINT,SIG_IGN);
+        signal(SIGUSR1,SignHandler_2);
+        while(1){
+            close(filedis[0]);
+            sprintf(info,"I send you %d times",counter);
+            write(filedis[1],info,40);
+            counter++;
+            sleep(1);
+        }
+    }
+    else if(child1 >0)
+    {
+        child2 = fork();
+        if(child2 == 0)
+        {
+            printf("Process2 pid %d\n",getpid());
+            signal(SIGINT,SIG_IGN);
+            signal(SIGUSR1,SignHandler_2);
+            while(1){
+                close(filedis[1]);
+                read(filedis[0],buffer,40);
+                printf("%s\n",buffer);
+            }
+        }
+        waitpid(child1,NULL,0);
+        printf("Child Process1 is killed!\n");
+        waitpid(child2,NULL,0);
+        printf("Child Process2 is killed!\n");
+        close(filedis[0]);
+        close(filedis[1]);
+        printf("Parent Process is killed!\n");
+    }
+    return 0;
+}
+void SignHandler_1(int signum)
+{
+    printf("\nParent receive signal Ctrl+C\n");
+    if(signum == SIGINT)
+    {
+        kill(child1,SIGUSR1);
+        kill(child2,SIGUSR1);
+    }
+}
+void SignHandler_2(int signum)
+{
+    close(filedis[0]);
+    close(filedis[1]);
+    if(child1 == 0 && signum == SIGUSR1)
+    {
+        printf("Child Process1 is killed by Parent!\n");
+        exit(0);
+    }
+    if(child2 == 0 && signum == SIGUSR1)
+    {
+        printf("Child Process2 is killed by Parent!\n");
+        exit(0);
+    }
+}
